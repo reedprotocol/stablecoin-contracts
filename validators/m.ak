@@ -190,8 +190,8 @@ validator(params: t.MParams) {
                     datum: treas_datum,
                     reference_script: None
                   } = treas_output
-                  trace @"        1. Own payment address"
-                  expect own_cred == treas_address.payment_credential
+                  trace @"        1. Own (unstaked) address"
+                  expect treas_address == Address(own_cred, None)
                   trace @"        2. Value is ada + `ree_fee` microree "
                   expect [_, (treas_hash, treas_name, ree_fee)] =
                     value.flatten(treas_value)
@@ -335,7 +335,7 @@ validator(params: t.MParams) {
                   expect
                     if cont_val_tn == only_val_tn {
                       and {
-                        delta_debt <= 0,
+                        delta_debt < 0,
                         cont_debt >= 0,
                       }
                     } else {
@@ -364,13 +364,13 @@ validator(params: t.MParams) {
             expect Some(treas_output) =
               list.at(outputs, list.length(input_condensate))
             expect Output {
-              address: treas_output,
+              address: treas_address,
               value: treas_val,
               datum: InlineDatum(treas_datum),
               reference_script: None,
             } = treas_output
-            trace @"    1. Address is own"
-            expect treas_output.payment_credential == own_cred
+            trace @"    1. Address is own (unstaked)"
+            expect treas_address == Address(own_cred, None)
             trace @"    2. Value is ada + ree fee matching `total_fee`"
             expect [_, (treas_val_hash, treas_val_tn, treas_val_qty)] =
               value.flatten(treas_val)
@@ -530,26 +530,25 @@ validator(params: t.MParams) {
           t.Tidy -> {
             trace @"1. Redeemer is `Tidy`"
             trace @"2. `n_inputs` of own inputs:"
-            trace @"    1. Value totals `input_ada` of lovelace and `input_ree` of microree"
+            trace @"    1. Value totals `input_ree` of microree"
             trace @"    2. Datum is always `Treasury` "
-            let (n_inputs, input_ada, input_ree) =
+            let (n_inputs, input_ree) =
               list.foldr(
                 inputs,
-                (0, 0, 0),
-                fn(cur: Input, acc: (Int, Int, Int)) {
+                (0, 0),
+                fn(cur: Input, acc: (Int, Int)) {
                   let Output { address, value, datum, .. } = cur.output
                   if address.payment_credential == own_cred {
                     expect InlineDatum(datum_inner) = datum
                     expect dat: t.MDat = datum_inner
                     when dat is {
                       t.Treasury -> {
-                        let ada = value |> value.lovelace_of
                         let ree = value |> value.quantity_of(
                           ree_hash,
                           tokens.ree(),
                         )
 
-                        (acc.1st + 1, acc.2nd + ada, acc.3rd + ree)
+                        (acc.1st + 1, acc.2nd + ree)
                       }
                       _ -> fail @"Treasury inputs only"
                     }
@@ -568,8 +567,8 @@ validator(params: t.MParams) {
             } = treas_output
             trace @"    1. Address is (unstaked) own address"
             expect treas_address == Address(own_cred, None)
-            trace @"    2. Value is `output_ada` of lovelace and `output_ree` of microree"
-            expect [(_,_,output_ada), (treas_pid, treas_tn, output_ree)] = treas_value |> value.flatten()
+            trace @"    2. Value includes lovelace and `output_ree` of microree"
+            expect [(_,_,_), (treas_pid, treas_tn, output_ree)] = treas_value |> value.flatten()
             expect and {
               treas_pid == ree_hash,
               treas_tn == tokens.ree(),
@@ -578,11 +577,10 @@ validator(params: t.MParams) {
             expect t.Treasury: t.MDat = treas_datum
             let n_outputs = 1 + (rest |> count_while(fn(o) { o == treas_output }))
             trace @"4. Number of own outputs no greater than own inputs ie `n_inputs >= n_outputs`"
-            trace @"5. Output ada at least as great as input ie `input_ada <= output_ada * n_outputs`"
+            trace @"5. Input lovelace may be used as tidy reward"
             trace @"6. Output microree is (almost) as great as input. (Grace allows for rounding down)"
             expect and {
               (n_inputs >= n_outputs)?,
-              (input_ada <= n_outputs * output_ada)?,
               (input_ree - n_outputs < n_outputs * output_ree)?,
             }
             trace @"7. Get exchange rates"
