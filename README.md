@@ -10,10 +10,10 @@ This is an aiken project. For more about aiken see the
 ## Scripts
 
 * **m.ak** - Main protocol logic
-* **er_main.ak** - Mainnet price feeds consumption (Orcfax & Charli3)
+* **er_orcfax.ak** - Single price feed consumption (Orcfax)
+* **er_orcfax_charli3.ak** - Dual price feeds consumption (Orcfax & Charli3)
 * **erp.ak** - Oracle exchange rate pointer
 * **rm.ak** - REE token minting
-* **er_test.ak** - Testnet price feed consumption (Orcfax)
 * **x.ak** - Helper functions
 
 ## Build
