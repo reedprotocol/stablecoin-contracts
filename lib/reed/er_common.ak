@@ -33,7 +33,7 @@ pub fn get_inline_datum(i: Input) -> Data {
 
 pub fn check_prefix(prefix: ByteArray) -> Bool {
   let l = bytearray.length(prefix)
-  expect l > 0
+  expect l >= 2
   expect bytearray.drop(prefix, l - 1) == "/"
   True
 }
