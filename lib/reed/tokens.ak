@@ -4,11 +4,11 @@ use aiken/hash.{blake2b_256}
 use aiken/transaction.{OutputReference}
 
 pub fn validity_token_pref() -> ByteArray {
-  #"000de140"
+  #"000643b0"
 }
 
 pub fn auth_token_pref() -> ByteArray {
-  #"000643b0"
+  #"000de140"
 }
 
 pub fn usdr() -> ByteArray {
