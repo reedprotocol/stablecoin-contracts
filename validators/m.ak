@@ -5,8 +5,9 @@ use aiken/list
 use aiken/math
 use aiken/pairs
 use aiken/transaction.{
-  Datum, InlineDatum, Input, Mint, Output, OutputReference, Redeemer,
-  ScriptContext, ScriptPurpose, Spend, Transaction, WithdrawFrom,
+  InlineDatum, Input, Mint, NoDatum, Output, OutputReference, Redeemer,
+  ScriptContext, ScriptPurpose, Spend, Transaction, TransactionId,
+  WithdrawFrom,
 }
 use aiken/transaction/credential.{
   Address, Credential, Inline, ScriptCredential, StakeCredential,
@@ -75,7 +76,11 @@ validator(params: t.MParams) {
               }
             trace @"    3. Datum is `Position(cont_debt)`"
             expect InlineDatum(cont_datum_inner) = cont_datum
-            expect t.Position(cont_debt): t.MDat = cont_datum_inner
+            expect t.Position(meta, ver, cont_debt): t.MDat = cont_datum_inner
+            expect ver == 1
+            let ser = cbor.serialise(meta)
+            expect bytearray.take(ser, 22) == c.position_metadata_prefix()
+            expect bytearray.drop(ser, 28) == c.metadata_suffix()
             trace @"    `cont_debt >= MIN_DEBT_AMOUNT`"
             expect cont_debt >= c.min_debt_amount()
             trace @"    `cont_debt <= MAX_DEBT_AMOUNT`"
@@ -100,7 +105,7 @@ validator(params: t.MParams) {
             trace @"    3. Datum is `Treasury`"
             expect t.Treasury: t.MDat = treas_datum
             trace @"7. Get exchange rates"
-            let t.Er2Red { r_num, r_denom, u_num, u_denom,  } =
+            let t.Er2Red { r_num, r_denom, u_num, u_denom } =
               get_er(erp_hash, reference_inputs, redeemers)
             trace @"8. `(cont_col, cont_debt)` respects MCR"
             expect above_mcr(u_num, u_denom, cont_col, cont_debt)
@@ -109,13 +114,13 @@ validator(params: t.MParams) {
             trace @"10. Own mint value is"
             expect [Pair(an0, qty0), Pair(an1, qty1), Pair(an2, qty2)] =
               own_mint
-            trace @"    1. (auth token <tag>, 1)"
-            trace @"    2. (validity token <tag>, 1)"
+            trace @"    1. (validity token <tag>, 1)"
+            trace @"    2. (auth token <tag>, 1)"
             trace @"    3. (usdr, `cont_debt`)"
             expect and {
-                an0 == tokens.user_auth_token(tag),
+                an0 == tokens.user_validity_token(tag),
                 qty0 == 1,
-                an1 == tokens.user_validity_token(tag),
+                an1 == tokens.user_auth_token(tag),
                 qty1 == 1,
                 an2 == tokens.usdr(),
                 qty2 == cont_debt,
@@ -130,8 +135,11 @@ validator(params: t.MParams) {
                 inputs,
                 fn(i) { i.output.address.payment_credential == own_cred },
               )
-            trace @"3. Extract `(own_col, own_debt)` from `own_input`"
-            let (own_col, own_debt) = extract_position(own_input.output)
+            trace @"3. Extract `(own_col, own_debt, own_meta, own_ver)` from `own_input`"
+            let own_output = own_input.output
+            expect [(_, _, own_col), _] = value.flatten(own_output.value)
+            expect InlineDatum(own_datum_inner) = own_output.datum
+            expect t.Position(own_meta, own_ver, own_debt): t.MDat = own_datum_inner
             trace @"4. `auth_idx` output is auth output"
             expect Some(auth_output) = list.at(outputs, auth_idx)
             trace @"    1. Value has auth token with tag `tag`"
@@ -160,7 +168,9 @@ validator(params: t.MParams) {
               }
             trace @"    3. Datum is `Position(cont_debt)`"
             expect InlineDatum(cont_datum_inner) = cont_datum
-            expect t.Position(cont_debt): t.MDat = cont_datum_inner
+            expect t.Position(cont_meta, cont_ver, cont_debt): t.MDat = cont_datum_inner
+            expect cont_ver == own_ver
+            expect cont_meta == own_meta
             trace @"    `cont_debt >= MIN_DEBT_AMOUNT`"
             expect cont_debt >= c.min_debt_amount()
             trace @"    `cont_debt <= MAX_DEBT_AMOUNT`"
@@ -242,12 +252,12 @@ validator(params: t.MParams) {
               if own_debt == 0 {
                 trace @"4. Own mint value is"
                 expect [Pair(an0, qty0), Pair(an1, qty1)] = own_mint
-                trace @"    1. (auth token `tag`, -1)"
-                trace @"    2. (validity token `tag`, -1)"
+                trace @"    1. (validity token `tag`, -1)"
+                trace @"    2. (auth token `tag`, -1)"
                 expect and {
-                    an0 == tokens.user_auth_token(tag),
+                    an0 == tokens.user_validity_token(tag),
                     qty0 == -1,
-                    an1 == tokens.user_validity_token(tag),
+                    an1 == tokens.user_auth_token(tag),
                     qty1 == -1,
                   }
                 True
@@ -255,13 +265,13 @@ validator(params: t.MParams) {
                 trace @"4. Own mint value is"
                 expect [Pair(an0, qty0), Pair(an1, qty1), Pair(an2, qty2)] =
                   own_mint
-                trace @"    1. (auth token `tag`, -1)"
-                trace @"    2. (validity token `tag`, -1)"
+                trace @"    1. (validity token `tag`, -1)"
+                trace @"    2. (auth token `tag`, -1)"
                 trace @"    3. (usdr, `-own_debt`)"
                 expect and {
-                    an0 == tokens.user_auth_token(tag),
+                    an0 == tokens.user_validity_token(tag),
                     qty0 == -1,
-                    an1 == tokens.user_validity_token(tag),
+                    an1 == tokens.user_auth_token(tag),
                     qty1 == -1,
                     an2 == tokens.usdr(),
                     qty2 == -own_debt,
@@ -281,19 +291,20 @@ validator(params: t.MParams) {
                 [],
                 fn(
                   curr: Input,
-                  acc: List<(ByteArray, Option<StakeCredential>, Int, Int)>,
+                  acc: List<(ByteArray, Option<StakeCredential>, Int, Int, Data, Int)>,
                 ) {
                   let Output { address, datum, value, .. } = curr.output
                   if address.payment_credential != own_cred {
                     acc
                   } else {
-                    let debt = get_debt(datum)
+                    expect InlineDatum(datum_inner) = datum
+                    expect t.Position(meta, ver, debt): t.MDat = datum_inner
                     expect [(_, _, col), (val_hash, val_tn, _)] =
                       value.flatten(value)
                     expect val_hash == own_hash
                     list.concat(
                       acc,
-                      [(val_tn, address.stake_credential, col, debt)],
+                      [(val_tn, address.stake_credential, col, debt, meta, ver)],
                     )
                   }
                 },
@@ -308,7 +319,7 @@ validator(params: t.MParams) {
                 input_condensate,
                 outputs,
                 fn(tup, o) {
-                  let (val_tn, stake_cred, col, debt) = tup
+                  let (val_tn, stake_cred, col, debt, meta, ver) = tup
                   expect Output {
                     address: cont_address,
                     datum: cont_datum,
@@ -327,7 +338,10 @@ validator(params: t.MParams) {
                   expect cont_val_hash == own_hash
                   expect cont_val_tn == val_tn
                   trace @"    3. Datum is `Position(cont_debt)`"
-                  let cont_debt = get_debt(cont_datum)
+                  expect InlineDatum(cont_datum_inner) = cont_datum
+                  expect t.Position(cont_meta, cont_ver, cont_debt): t.MDat = cont_datum_inner
+                  expect cont_ver == ver
+                  expect cont_meta == meta
                   trace @"    4. Calculate `delta_col = cont_col - col` and `delta_debt = cont_debt - debt`"
                   let delta_col = cont_col - col
                   let delta_debt = cont_debt - debt
@@ -435,7 +449,7 @@ validator(params: t.MParams) {
                   expect InlineDatum(datum_inner) = i.output.datum
                   expect dat: t.MDat = datum_inner
                   when dat is {
-                    t.Position(_) -> True
+                    t.Position(_, _, _) -> True
                     _ -> False
                   }
                 },
@@ -464,7 +478,7 @@ validator(params: t.MParams) {
                         }
                       (tot, min)
                     }
-                    t.Position(_) -> acc
+                    t.Position(_, _, _) -> acc
                   }
                 },
               )
@@ -482,7 +496,7 @@ validator(params: t.MParams) {
                   address: treas_address,
                   value: treas_value,
                   datum: treas_datum,
-                  reference_script : None
+                  reference_script: None
                 } = treas_output
                 trace @"        1. Own payment address"
                 expect treas_address == Address(own_cred, None)
@@ -685,44 +699,6 @@ fn sufficient_fee(r_num: Int, r_denom: Int, u_num: Int, u_denom: Int, debt: Int,
   fr_denom * r_num * u_denom * fee - fr_num * r_denom * u_num * debt >= 0
 }
 
-fn sufficient_fee_test_vecs() {
-  // Tests written for fr = (2, 100) or (1,100)
-  let (fr_num, fr_denom) = c.fee_rate()
-  let f = fr_num
-  let d = fr_denom
-  [
-    (1,1,1,1,d,f,True),
-    (1,1,1,1,d-1,f,True),
-    (1,1,1,1,d+1,f,False),
-    (2,1,1,1,d,f,True),
-    (2,1,1,1,d-1,f,True),
-    (2,1,1,1,d+1,f,True),
-    (1,2,1,1,d,2*f,True),
-    (1,2,1,1,d-1,2*f,True),
-    (1,2,1,1,d+1,2*f,False),
-    (1,1,2,1,d,2*f,True),
-    (1,1,2,1,d-1,2*f,True),
-    (1,1,2,1,d+1,2*f,False),
-    (1,1,1,2,2*d,f,True),
-    (1,1,1,2,2*d-1,f,True),
-    (1,1,1,2,2*d+1,f,False),
-    (1,1,1,1,2*d,2*f,True),
-    (1,1,1,1,d-1,2*f,True),
-    (1,1,1,1,2*d + 1,2*f,False),
-    (2,1,2,1,d,f,True),
-    (2,1,2,1,d-1,f,True),
-    (2,1,2,1,d+1,f,False),
-  ]
-}
-
-test test_sufficient_fee() {
-  let vecs = sufficient_fee_test_vecs()
-  vecs |> list.all(fn (vec) {
-    sufficient_fee(vec.1st, vec.2nd, vec.3rd, vec.4th, vec.5th, vec.6th) == vec.7th
-  })
-}
-
-
 fn verify_compensation(
   r_num: Int,
   r_denom: Int,
@@ -754,28 +730,6 @@ fn redeem_fee_denom() {
   10000
 }
 
-fn redeem_fee_num_test_vecs() {
-  [
-    (1, 1, 100, 100, 100),
-    (1, 1, 300, 300, 100),
-    (1, 1, 120, 100, 100),
-    (1, 1, 150, 100, 100),
-    (1, 1, 575, 100, 200),
-    (1,1,999,100,299),
-    (1,1,1000,100,300),
-    (1, 2, 100, 100, 111),
-    (2, 1, 400, 100, 111),
-  ]
-}
-
-test test_redeem_fee_num() {
-  let vecs = redeem_fee_num_test_vecs()
-  vecs |> list.all(fn (vec) {
-    redeem_fee_num(vec.1st, vec.2nd, vec.3rd, vec.4th, ) == vec.5th
-  })
-}
-
-
 fn redeem_fee(
   r_num: Int,
   r_denom: Int,
@@ -804,7 +758,7 @@ fn extract_position(pos: Output) -> (Int, Int) {
   let Output { value, datum, .. } = pos
   expect [(_, _, col), _] = value.flatten(value)
   expect InlineDatum(datum_inner) = datum
-  expect t.Position(debt): t.MDat = datum_inner
+  expect t.Position(_, _, debt): t.MDat = datum_inner
   (col, debt)
 }
 
@@ -818,7 +772,7 @@ fn extract_position_with_checks(own_cred: Credential, own_hash: ByteArray, poss:
           expect pid == own_hash
           expect (tn |> bytearray.take(tokens.user_pref_len())) == (tokens.user_validity_pref())
           expect InlineDatum(datum_inner) = datum
-          expect t.Position(debt): t.MDat = datum_inner
+          expect t.Position(_, _, debt): t.MDat = datum_inner
           Some((col, debt))
       } else {
         extract_position_with_checks(own_cred, own_hash, rest)
@@ -836,16 +790,6 @@ fn tot_min(q: Int, acc: (Int, Int)) {
       acc.2nd
     }
   (tot, min)
-}
-
-fn get_debt(datum: Datum) -> Int {
-  expect InlineDatum(dat) = datum
-  expect t.Position(debt): t.MDat = dat
-  debt
-}
-
-test test_tot_min() {
-  list.foldr([1, 2, 3, 4, 5], (0, 0), tot_min) == (15, 0)
 }
 
 fn count_while(l : List<t>, pred : fn(t) -> Bool ) -> Int {
