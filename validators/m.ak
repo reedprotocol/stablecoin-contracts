@@ -5,9 +5,8 @@ use aiken/list
 use aiken/math
 use aiken/pairs
 use aiken/transaction.{
-  InlineDatum, Input, Mint, NoDatum, Output, OutputReference, Redeemer,
-  ScriptContext, ScriptPurpose, Spend, Transaction, TransactionId,
-  WithdrawFrom,
+  InlineDatum, Input, Mint, Output, OutputReference, Redeemer,
+  ScriptContext, ScriptPurpose, Spend, Transaction, WithdrawFrom,
 }
 use aiken/transaction/credential.{
   Address, Credential, Inline, ScriptCredential, StakeCredential,
@@ -779,17 +778,6 @@ fn extract_position_with_checks(own_cred: Credential, own_hash: ByteArray, poss:
       }
     }
   }
-}
-
-fn tot_min(q: Int, acc: (Int, Int)) {
-  let tot = acc.1st + q
-  let min =
-    if q < acc.2nd {
-      q
-    } else {
-      acc.2nd
-    }
-  (tot, min)
 }
 
 fn count_while(l : List<t>, pred : fn(t) -> Bool ) -> Int {
