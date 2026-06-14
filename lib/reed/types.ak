@@ -68,6 +68,6 @@ pub type Debt =
   Int
 
 pub type MDat {
-  Position(Debt)
+  Position(Data, Int, Debt)
   Treasury
 }
