@@ -25,13 +25,9 @@ validator(params: t.ErpParams) {
         trace @"2. Own mint value is"
         trace @"    1. (erp-auth, 1) "
         trace @"    2. (erp-validity, 1)"
-        expect [Pair(tn_0, qty_0), Pair(tn_1, qty_1)] = own_tokens
-        expect and {
-            tn_0 == tokens.erp_auth_token(),
-            qty_0 == 1,
-            tn_1 == tokens.erp_validity_token(),
-            qty_1 == 1,
-          }
+        expect list.length(own_tokens) == 2
+        expect list.any(own_tokens, fn(p) { p.1st == tokens.erp_auth_token() && p.2nd == 1 })
+        expect list.any(own_tokens, fn(p) { p.1st == tokens.erp_validity_token() && p.2nd == 1 })
         when outputs is {
           [o0, ..] -> {
             trace @"3. 0th output is continuing output:"
