@@ -22,7 +22,7 @@ pub fn minimal_collateral_ratio() -> Rational {
 }
 
 pub fn critical_collateral_ratio() -> Rational {
-  (102, 100)
+  (103, 100)
 }
 
 pub fn treasury_top_up() -> Rational {
